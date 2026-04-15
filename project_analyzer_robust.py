@@ -296,54 +296,15 @@ def convert_series_from_minutes(series: pd.Series, display_unit: str) -> pd.Seri
     return series / UNIT_TO_MINUTES[display_unit]
 
 
-def create_histogram_advanced(
-    values,
-    mean_val,
-    median_val,
-    percentile_val,
-    p80_val,
-    expected_val,
-    service_level,
-    display_unit
-):
-    fig, ax = plt.subplots(figsize=(10, 5.5))
-
-    counts, bins, _ = ax.hist(
-        values,
-        bins=36,
-        alpha=0.8,
-        edgecolor="white",
-        linewidth=0.8,
-        label="Simulated completion times"
-    )
-
-    # Smoothed line using moving average over histogram counts
-    bin_centers = 0.5 * (bins[1:] + bins[:-1])
-    if len(bin_centers) > 2:
-        smooth = np.convolve(counts, np.ones(3) / 3, mode="same")
-        ax.plot(
-            bin_centers,
-            smooth,
-            linewidth=2,
-            label="Smoothed distribution"
-        )
-
-    # Confidence zones
-    ax.axvspan(np.min(values), p80_val, alpha=0.08, label="Up to P80")
-    ax.axvspan(p80_val, percentile_val, alpha=0.12, label=f"P80 to P{service_level}")
-
-    # Reference lines
-    ax.axvline(expected_val, linestyle="-.", linewidth=2, label="Expected schedule")
+def create_histogram(values, mean_val, percentile_val, service_level, display_unit):
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.hist(values, bins=32)
     ax.axvline(mean_val, linestyle="--", linewidth=2, label=f"Mean = {mean_val:.2f}")
-    ax.axvline(median_val, linestyle=":", linewidth=2, label=f"Median = {median_val:.2f}")
-    ax.axvline(percentile_val, linestyle="-", linewidth=2, label=f"P{service_level} = {percentile_val:.2f}")
-
-    ax.set_title("Simulated Project Completion Distribution")
-    ax.set_xlabel(f"Completion time ({display_unit})")
+    ax.axvline(percentile_val, linestyle=":", linewidth=2, label=f"P{service_level} = {percentile_val:.2f}")
+    ax.set_xlabel(f"Project completion time ({display_unit})")
     ax.set_ylabel("Frequency")
-    ax.grid(axis="y", alpha=0.25)
-    ax.legend(frameon=False, fontsize=9)
-
+    ax.set_title("Completion time distribution")
+    ax.legend()
     return fig
 
 
@@ -504,7 +465,6 @@ def run_analysis(df, display_unit, n_sims, random_seed, service_level, dist_name
         "criticality_df": crit_df,
         "hotspot_df": hotspot_df,
         "hit_expected": hit_expected,
-        "expected_schedule_display": convert_from_minutes(expected_duration_std, display_unit),
     }
 
 
@@ -605,45 +565,24 @@ with tab2:
             f"Simulation uses **{simulation_dist}** sampling."
         )
 
-        median_val = float(np.median(results["sim_values_display"]))
-        p80_val = float(np.percentile(results["sim_values_display"], 80))
-        expected_val = float(results["expected_schedule_display"])
-
         left, right = st.columns([1.35, 1])
         with left:
             st.pyplot(
-                create_histogram_advanced(
-                    values=results["sim_values_display"],
-                    mean_val=results["sim_mean"],
-                    median_val=median_val,
-                    percentile_val=results["service_deadline"],
-                    p80_val=p80_val,
-                    expected_val=expected_val,
-                    service_level=service_level,
-                    display_unit=display_unit,
+                create_histogram(
+                    results["sim_values_display"],
+                    results["sim_mean"],
+                    results["service_deadline"],
+                    service_level,
+                    display_unit
                 ),
                 use_container_width=True
             )
 
-            prob_finish_by_deadline = np.mean(results["sim_values_display"] <= results["service_deadline"])
-            st.caption(
-                f"The distribution shows uncertainty around total completion time. "
-                f"The project has about a {prob_finish_by_deadline:.1%} chance of finishing within "
-                f"{results['service_deadline']:.2f} {display_unit}."
-            )
-
         with right:
             percentile_df = pd.DataFrame({
-                "Measure": ["Expected schedule", "Mean", "Median", "P50", "P80", "P90", "P95", f"P{service_level}"],
+                "Measure": ["P50", "P80", "P90", "P95", f"P{service_level}"],
                 f"Value ({display_unit})": [
-                    results["expected_schedule_display"],
-                    results["sim_mean"],
-                    median_val,
-                    results["p50"],
-                    results["p80"],
-                    results["p90"],
-                    results["p95"],
-                    results["service_deadline"]
+                    results["p50"], results["p80"], results["p90"], results["p95"], results["service_deadline"]
                 ]
             })
             st.markdown("#### Percentile reference points")
@@ -749,7 +688,6 @@ with tab4:
         - Allows alternative simulation distributions
         - Adds sensitivity-style prioritization for tasks with greater schedule impact
         - Preserves dependency networks and advanced insights
-        - Uses a more informative histogram with confidence zones and reference markers
         - Still keeps the required A, B, and C outputs easy to find
 
         **Recommended workflow**
