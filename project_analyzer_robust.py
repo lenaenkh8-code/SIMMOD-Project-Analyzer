@@ -43,6 +43,35 @@ div[data-testid="stDataFrame"] {
 section[data-testid="stSidebar"] {
     background-color: #FAFBFC;
 }
+
+/* Better wrapping for markdown/text blocks */
+div[data-testid="stMarkdownContainer"] p,
+div[data-testid="stMarkdownContainer"] li,
+div[data-testid="stMarkdownContainer"] span {
+    word-break: break-word;
+}
+
+/* Custom critical path card */
+.critical-path-card {
+    border: 1px solid #E5E7EB;
+    border-radius: 12px;
+    padding: 14px 16px;
+    background-color: white;
+    min-height: 92px;
+}
+.critical-path-label {
+    font-size: 0.95rem;
+    color: #4B5563;
+    margin-bottom: 8px;
+}
+.critical-path-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.5;
+    color: #1F2937;
+    white-space: normal;
+    word-break: break-word;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -260,7 +289,6 @@ def simulate_project(df_std: pd.DataFrame, n_sims: int, random_seed: int = 42, d
     records = df_std.set_index("Label")[["min_std", "avg_std", "max_std"]].to_dict("index")
 
     results = np.zeros(n_sims)
-    critical_finish_counts = defaultdict(int)
 
     for i in range(n_sims):
         sampled = {
@@ -276,16 +304,7 @@ def simulate_project(df_std: pd.DataFrame, n_sims: int, random_seed: int = 42, d
         finish = max(ef.values()) if ef else 0.0
         results[i] = finish
 
-        for node in order:
-            if abs(ef[node] - finish) < 1e-8:
-                critical_finish_counts[node] += 1
-
-    crit_df = pd.DataFrame({
-        "Label": list(critical_finish_counts.keys()),
-        "Critical finish frequency": [v / n_sims for v in critical_finish_counts.values()]
-    }).sort_values("Critical finish frequency", ascending=False)
-
-    return results, crit_df
+    return results
 
 
 def convert_from_minutes(value_in_minutes: float, display_unit: str) -> float:
@@ -296,15 +315,51 @@ def convert_series_from_minutes(series: pd.Series, display_unit: str) -> pd.Seri
     return series / UNIT_TO_MINUTES[display_unit]
 
 
-def create_histogram(values, mean_val, percentile_val, service_level, display_unit):
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.hist(values, bins=32)
+def create_histogram_advanced(
+    values,
+    mean_val,
+    median_val,
+    percentile_val,
+    p80_val,
+    expected_val,
+    service_level,
+    display_unit
+):
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+
+    counts, bins, _ = ax.hist(
+        values,
+        bins=36,
+        alpha=0.8,
+        edgecolor="white",
+        linewidth=0.8,
+        label="Simulated completion times"
+    )
+
+    bin_centers = 0.5 * (bins[1:] + bins[:-1])
+    if len(bin_centers) > 2:
+        smooth = np.convolve(counts, np.ones(3) / 3, mode="same")
+        ax.plot(
+            bin_centers,
+            smooth,
+            linewidth=2,
+            label="Smoothed distribution"
+        )
+
+    ax.axvspan(np.min(values), p80_val, alpha=0.08, label="Up to P80")
+    ax.axvspan(p80_val, percentile_val, alpha=0.12, label=f"P80 to P{service_level}")
+
+    ax.axvline(expected_val, linestyle="-.", linewidth=2, label="Expected schedule")
     ax.axvline(mean_val, linestyle="--", linewidth=2, label=f"Mean = {mean_val:.2f}")
-    ax.axvline(percentile_val, linestyle=":", linewidth=2, label=f"P{service_level} = {percentile_val:.2f}")
-    ax.set_xlabel(f"Project completion time ({display_unit})")
+    ax.axvline(median_val, linestyle=":", linewidth=2, label=f"Median = {median_val:.2f}")
+    ax.axvline(percentile_val, linestyle="-", linewidth=2, label=f"P{service_level} = {percentile_val:.2f}")
+
+    ax.set_title("Simulated Project Completion Distribution")
+    ax.set_xlabel(f"Completion time ({display_unit})")
     ax.set_ylabel("Frequency")
-    ax.set_title("Completion time distribution")
-    ax.legend()
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend(frameon=False, fontsize=9)
+
     return fig
 
 
@@ -364,10 +419,10 @@ def generate_exec_summary(project_name, mean_val, service_level, deadline, p80, 
     cp = " → ".join(critical_nodes) if critical_nodes else "Not identified"
     return f"""Project: {project_name}
 
-Assignment-aligned answers
-A. Mean duration of the project: {mean_val:.2f} {display_unit}
-B. Histogram: generated in the dashboard to show the distribution of possible completion times
-C. {service_level}% service-level completion time: {deadline:.2f} {display_unit}
+Key results
+Mean duration of the project: {mean_val:.2f} {display_unit}
+Histogram: generated in the dashboard to show the distribution of possible completion times
+{service_level}% service-level completion time: {deadline:.2f} {display_unit}
 
 Additional interpretation
 - P80 = {p80:.2f} {display_unit}
@@ -381,12 +436,11 @@ The mean gives the central estimate, while the P{service_level} value is more ap
 """
 
 
-def build_excel(activity_df: pd.DataFrame, summary_df: pd.DataFrame, criticality_df: pd.DataFrame, hotspot_df: pd.DataFrame):
+def build_excel(activity_df: pd.DataFrame, summary_df: pd.DataFrame, hotspot_df: pd.DataFrame):
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         activity_df.to_excel(writer, sheet_name="Activity Analysis", index=False)
         summary_df.to_excel(writer, sheet_name="Summary", index=False)
-        criticality_df.to_excel(writer, sheet_name="Criticality", index=False)
         hotspot_df.to_excel(writer, sheet_name="Hotspots", index=False)
     buffer.seek(0)
     return buffer
@@ -396,7 +450,7 @@ def run_analysis(df, display_unit, n_sims, random_seed, service_level, dist_name
     active = df[(df["Activity"] != "") | (df["Label"] != "")].copy()
     df_std = add_standardized_columns(active)
     df_results, expected_duration_std, critical_nodes = compute_schedule(df_std)
-    sim_results_std, crit_df = simulate_project(df_std, n_sims=n_sims, random_seed=random_seed, dist_name=dist_name)
+    sim_results_std = simulate_project(df_std, n_sims=n_sims, random_seed=random_seed, dist_name=dist_name)
 
     sim_mean = convert_from_minutes(float(np.mean(sim_results_std)), display_unit)
     sim_std = convert_from_minutes(float(np.std(sim_results_std, ddof=1)), display_unit)
@@ -433,13 +487,13 @@ def run_analysis(df, display_unit, n_sims, random_seed, service_level, dist_name
 
     summary_df = pd.DataFrame({
         "Metric": [
-            f"A. Mean duration ({display_unit})",
+            f"Mean duration ({display_unit})",
             f"Simulation std. dev. ({display_unit})",
             f"P50 ({display_unit})",
             f"P80 ({display_unit})",
             f"P90 ({display_unit})",
             f"P95 ({display_unit})",
-            f"C. P{service_level} completion time ({display_unit})",
+            f"P{service_level} completion time ({display_unit})",
             "Probability of finishing within expected duration",
             "Expected critical path",
             "Simulation distribution",
@@ -462,9 +516,9 @@ def run_analysis(df, display_unit, n_sims, random_seed, service_level, dist_name
         "service_deadline": service_deadline,
         "critical_nodes": critical_nodes,
         "summary_df": summary_df,
-        "criticality_df": crit_df,
         "hotspot_df": hotspot_df,
         "hit_expected": hit_expected,
+        "expected_schedule_display": convert_from_minutes(expected_duration_std, display_unit),
     }
 
 
@@ -485,14 +539,14 @@ st.title("Project Duration Analyzer")
 st.caption("Robust enough for real project analysis, but still easy to navigate and presentation-friendly.")
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "Input data", "Assignment dashboard", "Advanced insights", "Outputs & guide"
+    "Input data", "Dashboard", "Advanced insights", "Outputs & guide"
 ])
 
 with tab1:
     st.subheader("1) Enter project activities")
-    st.write("This version keeps the assignment wording while adding a per-activity unit dropdown beside Maximum duration, plus optional Owner and Phase fields.")
+    st.write("This version supports a per-activity unit dropdown beside Maximum duration, plus optional Owner and Phase fields.")
 
-    source_choice = st.radio("Starting point", ["Use default computer design example", "Upload CSV"], horizontal=True)
+    source_choice = st.radio("Starting point", ["Use default example", "Upload CSV"], horizontal=True)
     if source_choice == "Upload CSV":
         uploaded = st.file_uploader("Upload CSV", type=["csv"])
         if uploaded is not None:
@@ -534,7 +588,7 @@ with tab1:
     else:
         st.success("Input looks valid.")
         q1, q2, q3, q4 = st.columns(4)
-        active = clean_df[(clean_df["Activity"] != "") | (clean_df["Label"] != "")]
+        active = clean_df[(clean_df["Activity"] != "") | (df["Label"] != "")] if False else clean_df[(clean_df["Activity"] != "") | (clean_df["Label"] != "")]
         q1.metric("Activities", int(len(active)))
         q2.metric("Start nodes", int((active["Immediate predecessors"] == "-").sum()))
         q3.metric("Owners listed", int((active["Owner"] != "").sum()))
@@ -542,8 +596,8 @@ with tab1:
         st.dataframe(active, use_container_width=True, hide_index=True)
 
 with tab2:
-    st.subheader("Assignment dashboard")
-    st.markdown("This tab is organized directly around the assignment questions: **A. mean duration**, **B. histogram**, and **C. 95% service-level completion time**.")
+    st.subheader("Dashboard")
+    st.markdown("This tab highlights the project’s mean duration, completion-time distribution, and selected service-level completion time.")
 
     validation_errors = validate_df(clean_df)
     if validation_errors:
@@ -551,41 +605,72 @@ with tab2:
     else:
         results = run_analysis(clean_df, display_unit, n_sims, int(random_seed), service_level, simulation_dist)
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("A. Mean duration", f"{results['sim_mean']:.2f} {display_unit}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Mean duration", f"{results['sim_mean']:.2f} {display_unit}")
         c2.metric("Std. deviation", f"{results['sim_std']:.2f} {display_unit}")
-        c3.metric(f"C. P{service_level} completion time", f"{results['service_deadline']:.2f} {display_unit}")
+        c3.metric(f"P{service_level} completion time", f"{results['service_deadline']:.2f} {display_unit}")
         c4.metric("Hit expected schedule", f"{results['hit_expected']:.1%}")
-        c5.metric("Critical path", " → ".join(results["critical_nodes"]) if results["critical_nodes"] else "N/A")
 
-        st.markdown("### Assignment answers")
+        critical_path_text = " → ".join(results["critical_nodes"]) if results["critical_nodes"] else "N/A"
+        st.markdown(
+            f"""
+            <div class="critical-path-card">
+                <div class="critical-path-label">Critical path</div>
+                <div class="critical-path-value">{critical_path_text}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.markdown("### Key results")
         st.info(
-            f"**A. Mean duration:** {results['sim_mean']:.2f} {display_unit}. "
-            f"**C. P{service_level} service level:** {results['service_deadline']:.2f} {display_unit}. "
+            f"**Mean duration:** {results['sim_mean']:.2f} {display_unit}. "
+            f"**P{service_level} service level:** {results['service_deadline']:.2f} {display_unit}. "
             f"Simulation uses **{simulation_dist}** sampling."
         )
+
+        median_val = float(np.median(results["sim_values_display"]))
+        p80_val = float(np.percentile(results["sim_values_display"], 80))
+        expected_val = float(results["expected_schedule_display"])
 
         left, right = st.columns([1.35, 1])
         with left:
             st.pyplot(
-                create_histogram(
-                    results["sim_values_display"],
-                    results["sim_mean"],
-                    results["service_deadline"],
-                    service_level,
-                    display_unit
+                create_histogram_advanced(
+                    values=results["sim_values_display"],
+                    mean_val=results["sim_mean"],
+                    median_val=median_val,
+                    percentile_val=results["service_deadline"],
+                    p80_val=p80_val,
+                    expected_val=expected_val,
+                    service_level=service_level,
+                    display_unit=display_unit,
                 ),
                 use_container_width=True
             )
 
+            prob_finish_by_deadline = np.mean(results["sim_values_display"] <= results["service_deadline"])
+            st.caption(
+                f"The distribution shows uncertainty around total completion time. "
+                f"The project has about a {prob_finish_by_deadline:.1%} chance of finishing within "
+                f"{results['service_deadline']:.2f} {display_unit}."
+            )
+
         with right:
             percentile_df = pd.DataFrame({
-                "Measure": ["P50", "P80", "P90", "P95", f"P{service_level}"],
+                "Measure": ["Expected schedule", "Mean", "Median", "P50", "P80", "P90", "P95", f"P{service_level}"],
                 f"Value ({display_unit})": [
-                    results["p50"], results["p80"], results["p90"], results["p95"], results["service_deadline"]
+                    results["expected_schedule_display"],
+                    results["sim_mean"],
+                    median_val,
+                    results["p50"],
+                    results["p80"],
+                    results["p90"],
+                    results["p95"],
+                    results["service_deadline"]
                 ]
             })
-            st.markdown("#### Percentile reference points")
+            st.markdown("#### Reference points")
             st.dataframe(percentile_df, use_container_width=True, hide_index=True)
 
         st.markdown("### Activity-level results")
@@ -614,15 +699,8 @@ with tab3:
         with row1_right:
             st.pyplot(create_risk_chart(results["df_display"], display_unit), use_container_width=True)
 
-        row2_left, row2_right = st.columns(2)
-        with row2_left:
-            st.pyplot(create_sensitivity_chart(results["df_display"]), use_container_width=True)
-        with row2_right:
-            st.markdown("### Simulation-based critical finish frequency")
-            if not results["criticality_df"].empty:
-                st.dataframe(results["criticality_df"], use_container_width=True, hide_index=True)
-            else:
-                st.info("No criticality table available for the current setup.")
+        st.markdown("### Sensitivity view")
+        st.pyplot(create_sensitivity_chart(results["df_display"]), use_container_width=True)
 
         st.markdown("### Dependency network")
         gv = make_graphviz(results["df_display"], results["critical_nodes"])
@@ -665,7 +743,6 @@ with tab4:
         excel_file = build_excel(
             results["df_display"],
             results["summary_df"],
-            results["criticality_df"],
             results["hotspot_df"]
         )
         st.download_button(
@@ -688,12 +765,13 @@ with tab4:
         - Allows alternative simulation distributions
         - Adds sensitivity-style prioritization for tasks with greater schedule impact
         - Preserves dependency networks and advanced insights
-        - Still keeps the required A, B, and C outputs easy to find
+        - Uses a more informative histogram with confidence zones and reference markers
+        - Keeps the interface general so other teams and companies can use it
 
         **Recommended workflow**
         1. Enter or upload project activities.
         2. Validate dependencies and duration ranges.
-        3. Review the Assignment dashboard for the required deliverables.
+        3. Review the Dashboard for the main outputs.
         4. Use Advanced insights for stronger presentation and business interpretation.
         5. Export the summary and workbook.
 
