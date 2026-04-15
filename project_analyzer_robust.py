@@ -82,6 +82,10 @@ UNIT_TO_MINUTES = {
     "months": 60 * 24 * 30,
 }
 
+PRIMARY_COLOR = "#7fb3d5"
+CRITICAL_COLOR = "#f4a6a6"
+EDGE_COLOR = "white"
+
 DEFAULT_DATA = pd.DataFrame([
     {"Activity": "Design", "Label": "A", "Immediate predecessors": "-", "Minimum duration": 16, "Average duration": 21, "Maximum duration": 26, "Unit of measure": "days", "Owner": "Engineering", "Phase": "Planning"},
     {"Activity": "Build prototype", "Label": "B", "Immediate predecessors": "A", "Minimum duration": 3, "Average duration": 6, "Maximum duration": 9, "Unit of measure": "days", "Owner": "Engineering", "Phase": "Build"},
@@ -327,7 +331,7 @@ def create_histogram_clean(
         alpha=0.8,
         edgecolor="white",
         linewidth=0.8,
-        color="#86b6d8"
+        color=PRIMARY_COLOR
     )
 
     ax.axvline(mean_val, linestyle="--", linewidth=2, label=f"Mean = {mean_val:.2f}", color="#356d9c")
@@ -345,7 +349,7 @@ def create_histogram_clean(
 
 def create_gantt_chart(df_display, display_unit):
     plot_df = df_display.sort_values(["ES", "Label"]).reset_index(drop=True)
-    colors = ["#f4b6b6" if c else "#7fb3d5" for c in plot_df["Critical"]]
+    colors = [CRITICAL_COLOR if c else PRIMARY_COLOR for c in plot_df["Critical"]]
 
     fig, ax = plt.subplots(figsize=(10, max(4, len(plot_df) * 0.48)))
     y = np.arange(len(plot_df))
@@ -355,7 +359,7 @@ def create_gantt_chart(df_display, display_unit):
         plot_df["Expected duration"],
         left=plot_df["ES"],
         color=colors,
-        edgecolor="white"
+        edgecolor=EDGE_COLOR
     )
     ax.set_yticks(y)
     ax.set_yticklabels(plot_df["Label"] + " - " + plot_df["Activity"])
@@ -371,14 +375,14 @@ def create_risk_chart(df_display, display_unit):
     temp["Impact score"] = temp["Risk range"] * np.where(temp["Critical"], 1.5, 0.75)
     temp = temp.sort_values("Impact score", ascending=True).tail(10)
 
-    colors = ["#f4a6a6" if c else "#7fb3d5" for c in temp["Critical"]]
+    colors = [CRITICAL_COLOR if c else PRIMARY_COLOR for c in temp["Critical"]]
 
     fig, ax = plt.subplots(figsize=(10, max(4, len(temp) * 0.45)))
     ax.barh(
         temp["Label"] + " - " + temp["Activity"],
         temp["Impact score"],
         color=colors,
-        edgecolor="white"
+        edgecolor=EDGE_COLOR
     )
     ax.set_xlabel(f"Indicative risk score ({display_unit})")
     ax.set_title("Top schedule uncertainty drivers")
@@ -388,14 +392,15 @@ def create_risk_chart(df_display, display_unit):
 
 def create_sensitivity_chart(df_display):
     temp = df_display.sort_values("Sensitivity score", ascending=True).tail(10)
-    colors = ["#f4a6a6" if c else "#8ecae6" for c in temp["Critical"]]
+
+    colors = [CRITICAL_COLOR if c else PRIMARY_COLOR for c in temp["Critical"]]
 
     fig, ax = plt.subplots(figsize=(10, max(4, len(temp) * 0.42)))
     ax.barh(
         temp["Label"] + " - " + temp["Activity"],
         temp["Sensitivity score"],
         color=colors,
-        edgecolor="white"
+        edgecolor=EDGE_COLOR
     )
     ax.set_xlabel("Sensitivity score")
     ax.set_title("Activities most likely to affect completion time")
@@ -405,14 +410,15 @@ def create_sensitivity_chart(df_display):
 
 def create_slack_chart(df_display, display_unit):
     temp = df_display.sort_values("Slack", ascending=True).copy().head(10)
-    colors = ["#f4a6a6" if c else "#a8dadc" for c in temp["Critical"]]
+
+    colors = [CRITICAL_COLOR if c else PRIMARY_COLOR for c in temp["Critical"]]
 
     fig, ax = plt.subplots(figsize=(10, max(4, len(temp) * 0.42)))
     ax.barh(
         temp["Label"] + " - " + temp["Activity"],
         temp["Slack"],
         color=colors,
-        edgecolor="white"
+        edgecolor=EDGE_COLOR
     )
     ax.set_xlabel(f"Slack ({display_unit})")
     ax.set_title("Lowest schedule flexibility")
@@ -649,6 +655,7 @@ with tab2:
         st.markdown("### Dependency network")
         gv = make_graphviz(results["df_display"], results["critical_nodes"])
         st.graphviz_chart(gv, use_container_width=True)
+        st.caption("Light red highlights the critical path. Blue nodes are non-critical activities.")
 
         st.markdown("### Key results")
         st.info(
@@ -717,6 +724,8 @@ with tab3:
         with row2_right:
             st.pyplot(create_slack_chart(results["df_display"], display_unit), use_container_width=True)
 
+        st.caption("Light red = critical-path activities • Blue = non-critical activities")
+
         st.markdown("### Delay hotspots")
         st.dataframe(
             results["hotspot_df"][[
@@ -777,6 +786,7 @@ with tab4:
         - Adds sensitivity-style prioritization for tasks with greater schedule impact
         - Preserves dependency networks and advanced insights
         - Uses a cleaner histogram with only the most useful reference markers
+        - Uses a consistent color system across all charts
         - Keeps the interface general so other teams and companies can use it
 
         **Recommended workflow**
