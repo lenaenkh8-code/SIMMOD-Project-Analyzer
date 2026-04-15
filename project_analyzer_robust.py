@@ -43,15 +43,11 @@ div[data-testid="stDataFrame"] {
 section[data-testid="stSidebar"] {
     background-color: #FAFBFC;
 }
-
-/* Better wrapping for markdown/text blocks */
 div[data-testid="stMarkdownContainer"] p,
 div[data-testid="stMarkdownContainer"] li,
 div[data-testid="stMarkdownContainer"] span {
     word-break: break-word;
 }
-
-/* Custom critical path card */
 .critical-path-card {
     border: 1px solid #E5E7EB;
     border-radius: 12px;
@@ -65,7 +61,7 @@ div[data-testid="stMarkdownContainer"] span {
     margin-bottom: 8px;
 }
 .critical-path-value {
-    font-size: 1.25rem;
+    font-size: 1.2rem;
     font-weight: 600;
     line-height: 1.5;
     color: #1F2937;
@@ -315,65 +311,58 @@ def convert_series_from_minutes(series: pd.Series, display_unit: str) -> pd.Seri
     return series / UNIT_TO_MINUTES[display_unit]
 
 
-def create_histogram_advanced(
+def create_histogram_clean(
     values,
     mean_val,
-    median_val,
     percentile_val,
-    p80_val,
     expected_val,
     service_level,
     display_unit
 ):
-    fig, ax = plt.subplots(figsize=(10, 5.5))
+    fig, ax = plt.subplots(figsize=(10, 5.2))
 
-    counts, bins, _ = ax.hist(
+    ax.hist(
         values,
-        bins=36,
+        bins=28,
         alpha=0.8,
         edgecolor="white",
         linewidth=0.8,
-        label="Simulated completion times"
+        color="#86b6d8"
     )
 
-    bin_centers = 0.5 * (bins[1:] + bins[:-1])
-    if len(bin_centers) > 2:
-        smooth = np.convolve(counts, np.ones(3) / 3, mode="same")
-        ax.plot(
-            bin_centers,
-            smooth,
-            linewidth=2,
-            label="Smoothed distribution"
-        )
+    ax.axvline(mean_val, linestyle="--", linewidth=2, label=f"Mean = {mean_val:.2f}", color="#356d9c")
+    ax.axvline(expected_val, linestyle="-.", linewidth=2, label=f"Expected = {expected_val:.2f}", color="#6c757d")
+    ax.axvline(percentile_val, linestyle=":", linewidth=2.2, label=f"P{service_level} = {percentile_val:.2f}", color="#d98c8c")
 
-    ax.axvspan(np.min(values), p80_val, alpha=0.08, label="Up to P80")
-    ax.axvspan(p80_val, percentile_val, alpha=0.12, label=f"P80 to P{service_level}")
-
-    ax.axvline(expected_val, linestyle="-.", linewidth=2, label="Expected schedule")
-    ax.axvline(mean_val, linestyle="--", linewidth=2, label=f"Mean = {mean_val:.2f}")
-    ax.axvline(median_val, linestyle=":", linewidth=2, label=f"Median = {median_val:.2f}")
-    ax.axvline(percentile_val, linestyle="-", linewidth=2, label=f"P{service_level} = {percentile_val:.2f}")
-
-    ax.set_title("Simulated Project Completion Distribution")
+    ax.set_title("Project Completion Time Distribution")
     ax.set_xlabel(f"Completion time ({display_unit})")
     ax.set_ylabel("Frequency")
-    ax.grid(axis="y", alpha=0.25)
-    ax.legend(frameon=False, fontsize=9)
+    ax.grid(axis="y", alpha=0.2)
+    ax.legend(frameon=False)
 
     return fig
 
 
 def create_gantt_chart(df_display, display_unit):
     plot_df = df_display.sort_values(["ES", "Label"]).reset_index(drop=True)
-    fig, ax = plt.subplots(figsize=(11, max(4, len(plot_df) * 0.5)))
+    colors = ["#f4b6b6" if c else "#7fb3d5" for c in plot_df["Critical"]]
+
+    fig, ax = plt.subplots(figsize=(10, max(4, len(plot_df) * 0.48)))
     y = np.arange(len(plot_df))
 
-    ax.barh(y, plot_df["Expected duration"], left=plot_df["ES"])
+    ax.barh(
+        y,
+        plot_df["Expected duration"],
+        left=plot_df["ES"],
+        color=colors,
+        edgecolor="white"
+    )
     ax.set_yticks(y)
     ax.set_yticklabels(plot_df["Label"] + " - " + plot_df["Activity"])
     ax.invert_yaxis()
     ax.set_xlabel(f"Time ({display_unit})")
     ax.set_title("Expected project timeline")
+    ax.grid(axis="x", alpha=0.2)
     return fig
 
 
@@ -382,19 +371,52 @@ def create_risk_chart(df_display, display_unit):
     temp["Impact score"] = temp["Risk range"] * np.where(temp["Critical"], 1.5, 0.75)
     temp = temp.sort_values("Impact score", ascending=True).tail(10)
 
+    colors = ["#f4a6a6" if c else "#7fb3d5" for c in temp["Critical"]]
+
     fig, ax = plt.subplots(figsize=(10, max(4, len(temp) * 0.45)))
-    ax.barh(temp["Label"] + " - " + temp["Activity"], temp["Impact score"])
+    ax.barh(
+        temp["Label"] + " - " + temp["Activity"],
+        temp["Impact score"],
+        color=colors,
+        edgecolor="white"
+    )
     ax.set_xlabel(f"Indicative risk score ({display_unit})")
     ax.set_title("Top schedule uncertainty drivers")
+    ax.grid(axis="x", alpha=0.2)
     return fig
 
 
 def create_sensitivity_chart(df_display):
     temp = df_display.sort_values("Sensitivity score", ascending=True).tail(10)
-    fig, ax = plt.subplots(figsize=(10, max(4, len(temp) * 0.45)))
-    ax.barh(temp["Label"] + " - " + temp["Activity"], temp["Sensitivity score"])
+    colors = ["#f4a6a6" if c else "#8ecae6" for c in temp["Critical"]]
+
+    fig, ax = plt.subplots(figsize=(10, max(4, len(temp) * 0.42)))
+    ax.barh(
+        temp["Label"] + " - " + temp["Activity"],
+        temp["Sensitivity score"],
+        color=colors,
+        edgecolor="white"
+    )
     ax.set_xlabel("Sensitivity score")
     ax.set_title("Activities most likely to affect completion time")
+    ax.grid(axis="x", alpha=0.2)
+    return fig
+
+
+def create_slack_chart(df_display, display_unit):
+    temp = df_display.sort_values("Slack", ascending=True).copy().head(10)
+    colors = ["#f4a6a6" if c else "#a8dadc" for c in temp["Critical"]]
+
+    fig, ax = plt.subplots(figsize=(10, max(4, len(temp) * 0.42)))
+    ax.barh(
+        temp["Label"] + " - " + temp["Activity"],
+        temp["Slack"],
+        color=colors,
+        edgecolor="white"
+    )
+    ax.set_xlabel(f"Slack ({display_unit})")
+    ax.set_title("Lowest schedule flexibility")
+    ax.grid(axis="x", alpha=0.2)
     return fig
 
 
@@ -402,15 +424,17 @@ def make_graphviz(df, critical_nodes):
     lines = [
         "digraph G {",
         'rankdir=LR;',
-        'node [shape=box, style="rounded,filled"];'
+        'node [shape=box, style="rounded,filled", color="#D1D5DB", fontname="Helvetica"];'
     ]
     for _, row in df.iterrows():
-        fill = "#f3dede" if row["Label"] in critical_nodes else "#eef3f8"
+        fill = "#f6c7c7" if row["Label"] in critical_nodes else "#edf3f8"
         safe_activity = str(row["Activity"]).replace('"', "'")
         lines.append(f'"{row["Label"]}" [label="{row["Label"]}: {safe_activity}", fillcolor="{fill}"];')
     for _, row in df.iterrows():
         for pred in parse_predecessors(row["Immediate predecessors"]):
-            lines.append(f'"{pred}" -> "{row["Label"]}";')
+            edge_color = "#d98c8c" if pred in critical_nodes and row["Label"] in critical_nodes else "#9CA3AF"
+            pen_width = "2.2" if pred in critical_nodes and row["Label"] in critical_nodes else "1.2"
+            lines.append(f'"{pred}" -> "{row["Label"]}" [color="{edge_color}", penwidth={pen_width}];')
     lines.append("}")
     return "\n".join(lines)
 
@@ -588,7 +612,7 @@ with tab1:
     else:
         st.success("Input looks valid.")
         q1, q2, q3, q4 = st.columns(4)
-        active = clean_df[(clean_df["Activity"] != "") | (df["Label"] != "")] if False else clean_df[(clean_df["Activity"] != "") | (clean_df["Label"] != "")]
+        active = clean_df[(clean_df["Activity"] != "") | (clean_df["Label"] != "")]
         q1.metric("Activities", int(len(active)))
         q2.metric("Start nodes", int((active["Immediate predecessors"] == "-").sum()))
         q3.metric("Owners listed", int((active["Owner"] != "").sum()))
@@ -597,7 +621,7 @@ with tab1:
 
 with tab2:
     st.subheader("Dashboard")
-    st.markdown("This tab highlights the project’s mean duration, completion-time distribution, and selected service-level completion time.")
+    st.markdown("This tab highlights the project’s mean duration, completion-time distribution, selected service-level completion time, and dependency structure.")
 
     validation_errors = validate_df(clean_df)
     if validation_errors:
@@ -622,6 +646,10 @@ with tab2:
             unsafe_allow_html=True
         )
 
+        st.markdown("### Dependency network")
+        gv = make_graphviz(results["df_display"], results["critical_nodes"])
+        st.graphviz_chart(gv, use_container_width=True)
+
         st.markdown("### Key results")
         st.info(
             f"**Mean duration:** {results['sim_mean']:.2f} {display_unit}. "
@@ -629,19 +657,15 @@ with tab2:
             f"Simulation uses **{simulation_dist}** sampling."
         )
 
-        median_val = float(np.median(results["sim_values_display"]))
-        p80_val = float(np.percentile(results["sim_values_display"], 80))
         expected_val = float(results["expected_schedule_display"])
 
         left, right = st.columns([1.35, 1])
         with left:
             st.pyplot(
-                create_histogram_advanced(
+                create_histogram_clean(
                     values=results["sim_values_display"],
                     mean_val=results["sim_mean"],
-                    median_val=median_val,
                     percentile_val=results["service_deadline"],
-                    p80_val=p80_val,
                     expected_val=expected_val,
                     service_level=service_level,
                     display_unit=display_unit,
@@ -649,29 +673,17 @@ with tab2:
                 use_container_width=True
             )
 
-            prob_finish_by_deadline = np.mean(results["sim_values_display"] <= results["service_deadline"])
-            st.caption(
-                f"The distribution shows uncertainty around total completion time. "
-                f"The project has about a {prob_finish_by_deadline:.1%} chance of finishing within "
-                f"{results['service_deadline']:.2f} {display_unit}."
-            )
-
         with right:
-            percentile_df = pd.DataFrame({
-                "Measure": ["Expected schedule", "Mean", "Median", "P50", "P80", "P90", "P95", f"P{service_level}"],
+            summary_points = pd.DataFrame({
+                "Measure": ["Expected schedule", "Mean", f"P{service_level}"],
                 f"Value ({display_unit})": [
                     results["expected_schedule_display"],
                     results["sim_mean"],
-                    median_val,
-                    results["p50"],
-                    results["p80"],
-                    results["p90"],
-                    results["p95"],
                     results["service_deadline"]
                 ]
             })
-            st.markdown("#### Reference points")
-            st.dataframe(percentile_df, use_container_width=True, hide_index=True)
+            st.markdown("#### Key reference points")
+            st.dataframe(summary_points, use_container_width=True, hide_index=True)
 
         st.markdown("### Activity-level results")
         show_cols = [
@@ -699,12 +711,11 @@ with tab3:
         with row1_right:
             st.pyplot(create_risk_chart(results["df_display"], display_unit), use_container_width=True)
 
-        st.markdown("### Sensitivity view")
-        st.pyplot(create_sensitivity_chart(results["df_display"]), use_container_width=True)
-
-        st.markdown("### Dependency network")
-        gv = make_graphviz(results["df_display"], results["critical_nodes"])
-        st.graphviz_chart(gv, use_container_width=True)
+        row2_left, row2_right = st.columns(2)
+        with row2_left:
+            st.pyplot(create_sensitivity_chart(results["df_display"]), use_container_width=True)
+        with row2_right:
+            st.pyplot(create_slack_chart(results["df_display"], display_unit), use_container_width=True)
 
         st.markdown("### Delay hotspots")
         st.dataframe(
@@ -765,7 +776,7 @@ with tab4:
         - Allows alternative simulation distributions
         - Adds sensitivity-style prioritization for tasks with greater schedule impact
         - Preserves dependency networks and advanced insights
-        - Uses a more informative histogram with confidence zones and reference markers
+        - Uses a cleaner histogram with only the most useful reference markers
         - Keeps the interface general so other teams and companies can use it
 
         **Recommended workflow**
